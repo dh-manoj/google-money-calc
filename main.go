@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -233,12 +236,84 @@ func Mul(l *Money, r float64) (*Money, error) {
 		CurrencyCode: l.GetCurrencyCode()}, nil
 }
 
+func generate() {
+	for i := 700; i < 2000; i++ {
+		for j := 1510; j < 1600; j++ {
+			fmt.Printf("%d,%d\n", i, j)
+		}
+	}
+}
+
 func test1() {
-	l := &Money{Units: 19, Nanos: 13, CurrencyCode: "E"}
+	l := &Money{Units: 19, Nanos: 13, CurrencyCode: ""}
 	l2, err := Mul(l, 15.11)
 	fmt.Println(err, l2)
 }
 
+func convertNanos(val string) int32 {
+	var sb strings.Builder
+	sb.Grow(10)
+	sb.WriteString(val)
+	for sb.Len() < 9 {
+		sb.WriteRune('0')
+	}
+	i, _ := strconv.ParseInt(sb.String(), 10, 32)
+	return int32(i)
+}
+
+func convertToMoney(val string) *Money {
+	vals := strings.Split(val, ".")
+	if len(vals) == 1 {
+		vals = append(vals, "")
+	}
+	units, _ := strconv.ParseInt(vals[0], 10, 64)
+	return &Money{
+		Units:        units,
+		Nanos:        convertNanos(vals[1]),
+		CurrencyCode: "",
+	}
+}
+
+func ReadCsvFile(filePath string) {
+	// Load a csv file.
+	f, _ := os.Open(filePath)
+
+	// Create a new reader.
+	r := csv.NewReader(f)
+	for {
+		record, err := r.Read()
+		// Stop at EOF.
+		if err == io.EOF {
+			break
+		}
+
+		if err != nil {
+			panic(err)
+		}
+		// Display record.
+		// ... Display record length.
+		// ... Display all individual elements of the slice.
+		//fmt.Println(record)
+		m := convertToMoney(record[0])
+		vat, _ := strconv.ParseFloat(record[1], 64)
+		expected := convertToMoney(record[2])
+		//fmt.Println("input:", m, vat)
+		res, err := Mul(m, vat)
+		if err != nil {
+			fmt.Printf(err.Error())
+			continue
+		}
+		if res.Units != expected.Units || res.Nanos != expected.Nanos {
+			fmt.Println(m, vat, res, expected)
+		} else {
+			//fmt.Println("success: ", res, expected)
+		}
+		//time.Sleep(1 * time.Second)
+	}
+}
+
 func main() {
-	test1()
+	//generate()
+	//test1()
+	ReadCsvFile("./small_test.csv")
 }
