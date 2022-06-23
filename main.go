@@ -197,6 +197,18 @@ func Mul(l *Money, r float64) (*Money, error) {
 	intMulF, decMulF := math.Modf(r)
 	intMul, decMul := int64(intMulF), int64(decMulF*float64(powerOf10))
 
+	// To handle edge scenarios where `decMulF*float64(powerOf10)` returns different value than expected.
+	// For example: decMulF = 0.29 and powerOf10 = 100 should give 29 rather than 28.
+	// Ensure the following invariant is true: decMulF == float64(decMul) / float64(powerOf10)
+	// Increment decimal multipler (decMul) if deviation is >= 1%
+	newDecMulF := float64(decMul) / float64(powerOf10)
+	if newDecMulF < decMulF {
+		percentageChange := ((decMulF - newDecMulF) / decMulF) * 100
+		if percentageChange >= 1 {
+			decMul++
+		}
+	}
+
 	// multiply both sections
 	nanosMultiplied := int64(l.GetNanos()) * intMul
 	if decMul != 0 {
