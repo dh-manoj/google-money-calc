@@ -172,6 +172,99 @@ func IsZero(m *Money) bool {
 	return m.GetUnits() == 0 && m.GetNanos() == 0
 }
 
+func Mulv2(l *Money, r float64) (*Money, error) {
+	// fmt.Println("l, r", l, r)
+	// It does not make sense to allow multiplication of a price with a negative value as part of the existing flows.
+	// We decided because of that to return an error in case a negative value is provided.
+	if r < 0 {
+		return nil, ErrInvalidMultiplierProvided
+	}
+
+	if !IsValid(l) {
+		return nil, ErrInvalidValue
+	}
+
+	if IsZero(l) || r == float64(0) {
+		return &Money{
+			CurrencyCode: l.CurrencyCode,
+			Units:        0,
+			Nanos:        0,
+		}, nil
+	}
+
+	multiplierDecPlaces := numDecPlaces(r)
+	powerOf10 := int64(math.Pow10(int(multiplierDecPlaces)))
+
+	intMulF, decMulF := math.Modf(r)
+	intMul, decMul := int64(intMulF), int64(decMulF*float64(powerOf10))
+
+	// To handle edge scenarios where `decMulF*float64(powerOf10)` returns different value than expected.
+	// For example: decMulF = 0.29 and powerOf10 = 100 should give 29 rather than 28.
+	// Ensure the following invariant is true: decMulF == float64(decMul) / float64(powerOf10)
+	// Increment decimal multipler (decMul) if deviation is >= 1%
+	newDecMulF := float64(decMul) / float64(powerOf10)
+	if newDecMulF < decMulF {
+		percentageChange := ((decMulF - newDecMulF) / decMulF) * 100
+		if percentageChange >= 0.01 {
+			decMul++
+		}
+	}
+
+	// multiply both sections
+	nanosMultiplied := int64(l.GetNanos()) * intMul
+	if decMul != 0 {
+		// For expressions like: a * b / c, if a and b are of type int64,
+		// then a * b could possibly exceed valid int64 range.
+		// To handle such scenarios and retain best value,
+		// perform division followed by multiplication: a * (b / c)
+		nanosMulF := float64(l.GetNanos()) * (float64(decMul) / float64(powerOf10))
+		nanosMul := int64(nanosMulF)
+		nanosMulDelta := nanosMulF - float64(nanosMul)
+		if nanosMulDelta > 0.5 {
+			nanosMul++
+		}
+		// nanosMultiplied += int64(float64(l.GetNanos()) * (float64(decMul) / float64(powerOf10)))
+		nanosMultiplied += nanosMul
+	}
+
+	intUnitsMultiplied := l.GetUnits() * intMul
+	decUnitsMultiplied := int64(0)
+	if decMul != 0 {
+		intUnitsMultiplied += int64(float64(l.GetUnits()*decMul) / float64(powerOf10))
+		decUnitsMultiplied = l.GetUnits() * decMul % powerOf10
+	}
+
+	// For multiplication operations, if one operand is small (of the order 1e-08),
+	//then int64 conversion would result in value 0.
+	// For example, int64(math.Pow10(9)/float64(powerOf10)) would be 0.
+	// To handle such scenarios and retain best value, perform multiplication across all operands involved,
+	// followed by casting to int64.
+	nanosDecUnitAdjusted := int64(float64(decUnitsMultiplied) * math.Pow10(9) / float64(powerOf10))
+
+	units := intUnitsMultiplied
+	nanos := nanosDecUnitAdjusted + nanosMultiplied
+
+	if (units >= 0 && nanos >= 0) || (units < 0 && nanos <= 0) {
+		// same sign <units, nanos>
+		units += nanos / nanosMod
+		nanos = nanos % nanosMod
+	} else {
+		// different sign. nanos guaranteed to not to go over the limit
+		if units > 0 {
+			units--
+			nanos += nanosMod
+		} else if units < 0 {
+			units++
+			nanos -= nanosMod
+		}
+	}
+
+	return &Money{
+		Units:        units,
+		Nanos:        int32(nanos),
+		CurrencyCode: l.GetCurrencyCode()}, nil
+}
+
 func MulNew(l *Money, r float64) (*Money, error) {
 	// It does not make sense to allow multiplication of a price with a negative value as part of the existing flows.
 	// We decided because of that to return an error in case a negative value is provided.
@@ -342,6 +435,14 @@ func Mul(l *Money, r float64) (*Money, error) {
 		CurrencyCode: l.GetCurrencyCode()}, nil
 }
 
+func generateMicro() {
+	for i := 5; i < 2000; i++ {
+		for j := 1100; j < 2000; j++ {
+			fmt.Printf("%d,%d\n", i, j)
+		}
+	}
+}
+
 func generateSmall() {
 	for i := 700; i < 2000; i++ {
 		for j := 1510; j < 1600; j++ {
@@ -390,7 +491,7 @@ func convertToMoney(val string) *Money {
 	}
 }
 
-func ReadCsvFile(filePath string) {
+func ReadCsvFile(filePath string, offset int) {
 	// Load a csv file.
 	f, _ := os.Open(filePath)
 
@@ -410,11 +511,11 @@ func ReadCsvFile(filePath string) {
 		// ... Display record length.
 		// ... Display all individual elements of the slice.
 		//fmt.Println(record)
-		m := convertToMoney(record[0])
-		vat, _ := strconv.ParseFloat(record[1], 64)
-		expected := convertToMoney(record[2])
+		m := convertToMoney(record[0+offset])
+		vat, _ := strconv.ParseFloat(record[1+offset], 64)
+		expected := convertToMoney(record[2+offset])
 		//fmt.Println("input:", m, vat)
-		res, err := MulNew(m, vat)
+		res, err := Mulv2(m, vat)
 		if err != nil {
 			fmt.Printf(err.Error())
 			continue
@@ -452,12 +553,14 @@ func DivideBy100(v float64) float64 {
 }
 
 func main() {
+	//generateMicro()
 	//generateSmall()
 	//generateBig()
 	//test1()
-	//ReadCsvFile("./small_test.csv")
-	//ReadCsvFile("./big_test.csv")
-	ReadCsvFile("./big_test2.csv")
+	ReadCsvFile("./small_test.csv", 0)
+	ReadCsvFile("./big_test.csv", 0)
+	ReadCsvFile("./big_test2.csv", 0)
+	ReadCsvFile("./micro_test.csv", 2)
 	//ReadCsvFile("./temp.csv")
 	//fmt.Println(DivideBy100(15.11))
 	//fmt.Println(DivideBy100(0.0012), DivideBy100(5433435.12))
