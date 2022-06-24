@@ -350,25 +350,25 @@ func ReadCsvFile(filePath string) {
 }
 
 func DivideBy100(v float64) float64 {
-	s := fmt.Sprintf("%f", v)
+	//Note: Negative float not supported
+	s := strconv.FormatFloat(v, 'G', -1, 64)
 	vs := strings.Split(s, ".")
-
-	m := string(vs[0])
-	p := string(vs[1])
-
-	if len(m) == 0 {
-		m = "00"
-	} else if len(m) == 1 {
-		m = "0" + m
+	beforeDecimal := (vs[0])
+	afterDecimal := (vs[1])
+	if len(beforeDecimal) == 0 {
+		beforeDecimal = "00"
+	} else if len(beforeDecimal) == 1 {
+		beforeDecimal = "0" + beforeDecimal
 	}
-	//x := m + p
-	move := string(m[len(m)-2:])
 
-	remaining := ""
-	if len(m) > 2 {
-		remaining = m[:len(m)-2]
+	var sb strings.Builder
+	if len(beforeDecimal) > 2 {
+		sb.WriteString(beforeDecimal[:len(beforeDecimal)-2])
 	}
-	res, _ := strconv.ParseFloat(remaining+"."+move+p, 64)
+	sb.WriteRune('.')
+	sb.WriteString(beforeDecimal[len(beforeDecimal)-2:]) //2 digit moved after decimal
+	sb.WriteString(afterDecimal)
+	res, _ := strconv.ParseFloat(sb.String(), 64)
 	return res
 }
 
